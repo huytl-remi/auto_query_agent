@@ -1,10 +1,14 @@
+# agents/query_classifier_agent.py
+import json
+from utils.json_parser import parse_json_response
+
 class QueryClassifierAgent:
     def __init__(self, llm_connector):
         self.llm_connector = llm_connector
 
     def classify_query(self, input_query):
         prompt = self.generate_prompt(input_query)
-        response = self.llm_connector.call_llm(prompt)
+        response = self.llm_connector.generate_text(prompt)
         return self.parse_classification(response)
 
     def generate_prompt(self, input_query):
@@ -52,11 +56,15 @@ Provide the analysis as a JSON object with the following structure:
 }}
 
 Ensure that all boolean values are true or false (not strings), and all text fields are properly escaped strings. Do not include any additional commentary.
+
+**Important**:
+- Only provide the JSON object in your response.
+- Do not add any explanations or extra text.
 """
 
     def parse_classification(self, response):
         try:
-            classification = response  # Assuming response is already a dict
+            classification = parse_json_response(response)
             temporal = classification.get("temporal", False)
             question = classification.get("question", False)
             number_of_scenes = classification.get("number_of_scenes", 0)

@@ -1,4 +1,4 @@
-# llm_connector_base.py
+# llm_connectors/llm_connector_base.py
 from abc import ABC, abstractmethod
 
 class LLMConnectorBase(ABC):

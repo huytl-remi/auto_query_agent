@@ -1,6 +1,6 @@
-# llm_connector.py
-from llm_connector_base import LLMConnectorBase
-from llm_connector_factory import get_llm_connector
+# llm_connectors/llm_connector.py
+from .llm_connector_base import LLMConnectorBase
+from .llm_connector_factory import get_llm_connector
 
 class LLMConnector(LLMConnectorBase):
     def __init__(self, provider_name, api_key, model=None):
