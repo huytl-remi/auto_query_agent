@@ -1,75 +1,182 @@
 # app.py
 import streamlit as st
-from llm_connectors.llm_connector import LLMConnector
-from main import Orchestrator
+import os
+
+from config import Config
+
+from services.search_service import perform_search
+from services.filter_service import apply_metadata_filters
+from services.validation_service import run_ai_validator
+
+from utilities.video_utils import display_video_for_frame, get_video_and_frame_idx
+from utilities.csv_utils import create_csv_file, create_csv_with_selected_images
+from utilities.model_utils import load_model, load_faiss_index, load_id2img_fps
+
+from data_loaders.metadata_loader import load_ocr_data, load_object_data, load_object_count_data
+
+from session.session_state import (
+    toggle_select,
+    toggle_delete,
+)
+
+st.set_page_config(layout="wide")
+
+# Initialize session state for deleted and selected images
+if "deleted_images" not in st.session_state:
+    st.session_state.deleted_images = set()
+
+if "selected_images" not in st.session_state:
+    st.session_state.selected_images = []
+
+def display_images(image_paths, id2img_fps):
+    cols = st.columns(5)
+    for i, path in enumerate(image_paths):
+        video_name, frame_idx, time_display = get_video_and_frame_idx(path, id2img_fps)
+        image_name = os.path.basename(path)  # Get the image file name like '0001.jpg'
+
+        with cols[i % 5]:  # Display images in 5 columns per row
+            st.image(path, caption=f"{i+1}. Video: {video_name}\nFrame: {frame_idx}\nTime: {time_display}")
+
+            if st.button(f"Play Video {video_name}", key=f"play_{i}"):
+                display_video_for_frame(video_name, frame_idx)
+
+            if st.button(f"Select Image {image_name}", key=f"select_{i}"):  # Use image_name here
+                toggle_select((video_name, frame_idx))
+
+            if st.button(f"Delete Image {image_name}", key=f"delete_{i}"):
+                toggle_delete(path)
+
+def display_validated_results(validated_results, id2img_fps):
+    # Filter out 'Weak Match' and 'No Match' results
+    filtered_results = [res for res in validated_results if res['category'] in ['Exact Match', 'Near Match']]
+
+    # Sort results, placing 'Exact Match' at the top
+    filtered_results.sort(key=lambda x: ('1' if x['category'] == 'Exact Match' else '2', -x['confidence_score']))
+
+    # Display the results
+    cols = st.columns(5)
+    for i, validation in enumerate(filtered_results):
+        path = validation['image']
+        image_index = i + 1
+        video_name, frame_idx, time_display = get_video_and_frame_idx(path, id2img_fps)
+        confidence = validation['confidence_score']
+        category = validation['category']
+        justification = validation['justification']
+
+        with cols[i % 5]:
+            st.image(path, caption=f"{image_index}. Video: {video_name}\nFrame: {frame_idx}\nTime: {time_display}")
+            st.write(f"Category: {category}")
+            st.write(f"Confidence Score: {confidence}")
+            st.write(f"Justification: {justification}")
+            if st.button(f"Play Video {video_name}", key=f"play_validated_{i}"):
+                display_video_for_frame(video_name, frame_idx)
+            if st.button(f"Select {image_index}", key=f"select_validated_{i}"):
+                toggle_select((video_name, frame_idx))
+            if st.button(f"Delete {image_index}", key=f"delete_validated_{i}"):
+                toggle_delete(path)
 
 def main():
-    st.title("Image Retrieval System")
+    st.title("Image Search")
 
-    # Configuration inputs
-    provider_name = st.selectbox("Select LLM Provider", ["OpenAI", "Anthropic", "Gemini"])
-    api_key = st.text_input("Enter API Key", type="password")
-    model_name = st.text_input("Enter Model Name (optional)")
+    # Inputs for top_k and search method
+    col1, col2, col3 = st.columns(3)
 
-    if st.button("Initialize LLM Connector"):
-        if not api_key:
-            st.error("API Key is required.")
-            return
+    with col1:
+        top_k = st.number_input("Enter value for top_k:", min_value=1, value=10)
 
-        try:
-            # Instantiate the LLMConnector
-            llm_connector = LLMConnector(provider_name, api_key, model_name)
-            st.success(f"LLM Connector initialized with provider: {provider_name}")
+    with col2:
+        search_method = st.selectbox("Choose search method:", ["CLIP", "Captioning", "OCR"])
 
-            # Instantiate the Orchestrator
-            orchestrator = Orchestrator(llm_connector)
+    with col3:
+        text_query = st.text_input(f"Enter your query for {search_method} search:", "")
 
-            # Input query from user
-            input_query = st.text_input("Enter your query:")
+    if text_query:
+        # Load configurations
+        config = Config()
+        model, preprocess = load_model()
+        index = load_faiss_index()
+        id2img_fps = load_id2img_fps()
 
-            if st.button("Run Query"):
-                if input_query:
-                    results = orchestrator.run_query(input_query)
-                    if results:
-                        st.write("Final Results:")
-                        display_results(results)
-                    else:
-                        st.write("No satisfactory results found.")
-                else:
-                    st.write("Please enter a query.")
-        except Exception as e:
-            st.error(f"Failed to initialize LLM Connector: {e}")
+        # Perform search
+        image_paths = perform_search(
+            search_method=search_method,
+            model=model,
+            index=index,
+            text_query=text_query,
+            top_k=top_k,
+            deleted_images=st.session_state.deleted_images,
+            id2img_fps=id2img_fps
+        )
 
-def display_results(validated_results):
-    for scene_validation in validated_results:
-        scene_number = scene_validation.get('scene', 1)
-        st.write(f"#### Scene {scene_number} Results")
+        # Apply metadata filters
+        ocr_keywords = []
+        object_names = []
+        object_counts = []
+        if search_method != "OCR":  # Assuming OCR search already incorporates OCR
+            ocr_data, available_ocr_keywords = load_ocr_data(image_paths)
+            object_data, available_objects = load_object_data(image_paths)
+            count_data, available_object_counts = load_object_count_data(image_paths)
 
-        if 'error' in scene_validation:
-            st.write(f"Error in validation: {scene_validation['error']}")
-            continue
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                ocr_keywords = st.multiselect("Select OCR text:", available_ocr_keywords)
+            with col2:
+                object_names = st.multiselect("Select Object:", available_objects)
+            with col3:
+                object_counts = st.multiselect("Select Object Count:", available_object_counts)
 
-        # Display results with confidence scores and justifications
-        results = scene_validation.get('results', [])
-        if results:
-            for result in results:
-                image = result.get('image')
-                category = result.get('category')
-                confidence_score = result.get('confidence_score')
-                justification = result.get('justification')
-                st.write(f"- **Image**: {image}")
-                st.write(f"  - **Category**: {category}")
-                st.write(f"  - **Confidence Score**: {confidence_score}")
-                st.write(f"  - **Justification**: {justification}")
-                if 'answer' in result and result['answer']:
-                    st.write(f"  - **Answer**: {result['answer']}")
+            if ocr_keywords or object_names or object_counts:
+                image_paths, _, _, _ = apply_metadata_filters(
+                    image_paths=image_paths,
+                    ocr_keywords=ocr_keywords,
+                    object_names=object_names,
+                    object_counts=object_counts
+                )
 
-            # Display question answer if available
-            question_answer = scene_validation.get('question_answer')
-            if question_answer:
-                st.write(f"**Answer to the question**: {question_answer}")
-        else:
-            st.write("No results after validation.")
+        # Display initial search results
+        st.subheader("Search Results")
+        display_images(image_paths, id2img_fps)
+
+        # AI Validator Button
+        if st.button("Run AI Validator on Results"):
+            validated_results = run_ai_validator(
+                image_paths=image_paths,
+                default_llm_provider=config.DEFAULT_LLM_PROVIDER,
+                config=config
+            )
+            st.subheader("Validated Results")
+            display_validated_results(validated_results, id2img_fps)
+
+        # CSV Creation and Selected Images Display
+        left_col, right_col = st.columns(2)
+        with left_col:
+            # CSV creation and download
+            st.subheader("Create CSV File")
+            x = st.number_input("Enter question number:", min_value=0, value=1)
+            y = st.selectbox("Select type (kis or qa):", ['kis', 'qa'])
+            video_id = st.text_input("Enter video_id:")
+            time_str = st.text_input("Enter time (mm:ss):")
+            answer = None
+            if y == 'qa':
+                answer = st.number_input("Enter answer:", min_value=0, value=1)
+
+            if st.button("Create CSV"):
+                csv_content, file_path = create_csv_file(x, y, video_id, time_str, answer)
+                if csv_content:
+                    st.download_button(label="Download CSV", data=csv_content, file_name=f"query-{x}-{y}.csv")
+
+        with right_col:
+            # Display selected images
+            st.subheader("Selected Images")
+            if st.session_state.selected_images:
+                for img in st.session_state.selected_images:
+                    st.write(f"Video: {img[0]}, Frame: {img[1]}")
+                    if st.button(f"Remove {img[0]} - {img[1]}"):
+                        st.session_state.selected_images.remove(img)
+
+                if st.button("Create CSV with selected images"):
+                    csv_content = create_csv_with_selected_images(st.session_state.selected_images, y, answer)
+                    st.download_button(label="Download CSV", data=csv_content, file_name=f"query-{y}.csv")
 
 if __name__ == "__main__":
     main()

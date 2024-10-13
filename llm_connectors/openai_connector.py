@@ -2,7 +2,7 @@
 import openai
 import base64
 import requests
-from llm_connector_base import LLMConnectorBase
+from .base import LLMConnectorBase
 
 class OpenAIConnector(LLMConnectorBase):
     def __init__(self, api_key, model="gpt-4"):

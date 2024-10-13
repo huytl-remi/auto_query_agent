@@ -2,7 +2,7 @@
 import anthropic
 import base64
 import httpx
-from llm_connector_base import LLMConnectorBase
+from .base import LLMConnectorBase
 
 class AnthropicConnector(LLMConnectorBase):
     def __init__(self, api_key, model="claude-2"):

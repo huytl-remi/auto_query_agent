@@ -1,6 +1,6 @@
 # gemini_connector.py
 import google.generativeai as genai
-from llm_connector_base import LLMConnectorBase
+from .base import LLMConnectorBase
 
 class GeminiConnector(LLMConnectorBase):
     def __init__(self, api_key, model="gemini-1.5-flash"):

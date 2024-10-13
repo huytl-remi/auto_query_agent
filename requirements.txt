@@ -1,0 +1,11 @@
+streamlit
+torch
+git+https://github.com/openai/CLIP.git
+faiss-cpu==1.7.4  # Use faiss-gpu==1.7.4 if using GPU
+openai
+pinecone-client==3.0.0
+google-generativeai
+anthropic
+httpx==0.25.1
+pandas==2.1.1
+python-dotenv==1.0.0
