@@ -1,5 +1,6 @@
 # services/validation_service.py
 from agents.result_validator_agent import ResultValidatorAgent
+import streamlit as st
 
 def run_ai_validator(image_paths, default_llm_provider, config):
     """
@@ -26,7 +27,11 @@ def run_ai_validator(image_paths, default_llm_provider, config):
     # Initialize the ResultValidatorAgent
     validator_agent = ResultValidatorAgent(llm_connector)
 
-    # Validate the results
-    validated_results = validator_agent.validate_results(image_results)
+    # Validate the results with error handling
+    try:
+        validated_results = validator_agent.validate_results(image_results)
+    except Exception as e:
+        st.error(f"Error during validation: {str(e)}")
+        validated_results = []
 
     return validated_results

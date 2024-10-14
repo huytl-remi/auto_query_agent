@@ -1,7 +1,11 @@
+# utilities/video_utils.py
 import os
 import subprocess
 import pandas as pd
 import streamlit as st
+import re  # Added for sanitization
+
+from utilities.utils import sanitize_filename  # Importing sanitize_filename
 
 def generate_unique_file_name(base_name, extension):
     """Generate a unique file name to avoid overwriting existing files."""
@@ -17,6 +21,7 @@ def generate_unique_file_name(base_name, extension):
 
 # Extract video segment based on time
 def extract_video_segment(video_id, start_time, end_time):
+    video_id = sanitize_filename(video_id)  # Sanitizing input
     video_part = video_id.split('_')[0]
     if video_part in [f"L{str(i).zfill(2)}" for i in range(1, 13)]:
         video_path = f"/content/drive/MyDrive/HCMC_AI/AIC_Video/Videos_{video_part}/video/{video_id}.mp4"
@@ -25,12 +30,17 @@ def extract_video_segment(video_id, start_time, end_time):
 
     base_output_file = f"{video_id}_segment"
     output_video_file = generate_unique_file_name(base_output_file, ".mp4")
+    output_video_file = sanitize_filename(output_video_file)  # Sanitizing output file name
 
     command = [
         "ffmpeg", "-ss", str(start_time), "-to", str(end_time),
         "-i", video_path, "-c", "copy", output_video_file
     ]
-    subprocess.run(command)
+    try:
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        st.error(f"Error executing ffmpeg: {e.stderr}")
+        return None
 
     return output_video_file
 
@@ -43,19 +53,21 @@ def display_video_for_frame(video_id, frame_time):
     # Call the function to extract the video segment for this time range
     output_video_file = extract_video_segment(video_id, start_time, end_time)
 
-    # Display the video on the Streamlit app
-    st.video(output_video_file)
+    if output_video_file:
+        # Display the video on the Streamlit app
+        st.video(output_video_file)
 
-    # Now calculate the actual start and end times in minutes and seconds
-    actual_start_minutes = int(start_time // 60)  # Minutes part
-    actual_start_seconds = int(start_time % 60)   # Seconds part
-    actual_end_minutes = int(end_time // 60)      # Minutes part
-    actual_end_seconds = int(end_time % 60)       # Seconds part
+        # Now calculate the actual start and end times in minutes and seconds
+        actual_start_minutes = int(start_time // 60)  # Minutes part
+        actual_start_seconds = int(start_time % 60)   # Seconds part
+        actual_end_minutes = int(end_time // 60)      # Minutes part
+        actual_end_seconds = int(end_time % 60)       # Seconds part
 
-    # Display the corrected time range
-    st.write(f"Video is playing from {actual_start_minutes}:{actual_start_seconds:02d} "
-             f"to {actual_end_minutes}:{actual_end_seconds:02d} of the video.")
-
+        # Display the corrected time range
+        st.write(f"Video is playing from {actual_start_minutes}:{actual_start_seconds:02d} "
+                 f"to {actual_end_minutes}:{actual_end_seconds:02d} of the video.")
+    else:
+        st.error("Unable to extract and display the video segment.")
 
 # Get video ID and frame index from the image path
 def get_video_and_frame_idx(image_path, id2img_fps):

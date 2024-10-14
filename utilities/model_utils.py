@@ -1,17 +1,14 @@
+# utilities/model_utils.py
 import torch
 import clip
 import faiss
 import json
 import os
+import streamlit as st
 from openai import OpenAI
 import pinecone
-import streamlit as st
-from pinecone import Pinecone, ServerlessSpec
 
 from config import Config
-
-pinecone_api_key = Config.PINECONE_API_KEY
-openai_api_key = Config.OPENAI_API_KEY
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -41,20 +38,23 @@ def search_image_by_text(model, index, text_query, top_k):
     D, I = index.search(text_features, top_k)
     return I, D
 
-pinecone_api_key = os.getenv('PINECONE_API_KEY')
-openai_api_key = os.getenv('OPENAI_API_KEY')
+# Initialize Pinecone and OpenAI using API keys from Config
+pinecone_api_key = Config.PINECONE_API_KEY
+openai_api_key = Config.OPENAI_API_KEY
 
-# Khởi tạo Pinecone và OpenAI bằng các API keys
-pc = Pinecone(api_key=pinecone_api_key)
+# Ensure API keys are available
+if not pinecone_api_key or not openai_api_key:
+    raise ValueError("Pinecone and OpenAI API keys must be set in the environment variables.")
+
+pinecone.init(api_key=pinecone_api_key)
 client = OpenAI(api_key=openai_api_key)
 
-# Tiếp tục các bước khởi tạo Pinecone và OpenAI
+# Continue with Pinecone and OpenAI setup
 index_name = "hcmaic-sokhao-2"
-captioning_index = pc.Index(index_name)
+captioning_index = pinecone.Index(index_name)
 
 def get_captioning_embedding(text_query):
-    client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-    return client.embeddings.create(input=[text_query], model="text-embedding-3-small").data[0].embedding
+    return client.embeddings.create(input=[text_query], model="text-embedding-ada-002").data[0].embedding
 
 def search_image_by_text_with_captioning(text_query, top_k):
     query_embedding = get_captioning_embedding(text_query)

@@ -1,6 +1,7 @@
 # app.py
 import streamlit as st
 import os
+import re  # Added for sanitization
 
 from config import Config
 
@@ -18,6 +19,8 @@ from session.session_state import (
     toggle_select,
     toggle_delete,
 )
+
+from utilities.utils import sanitize_filename  # Importing sanitize_filename
 
 st.set_page_config(layout="wide")
 
@@ -37,13 +40,13 @@ def display_images(image_paths, id2img_fps):
         with cols[i % 5]:  # Display images in 5 columns per row
             st.image(path, caption=f"{i+1}. Video: {video_name}\nFrame: {frame_idx}\nTime: {time_display}")
 
-            if st.button(f"Play Video {video_name}", key=f"play_{i}"):
+            if st.button(f"Play Video {video_name}", key=f"play_{path}"):
                 display_video_for_frame(video_name, frame_idx)
 
-            if st.button(f"Select Image {image_name}", key=f"select_{i}"):  # Use image_name here
+            if st.button(f"Select Image {i+1}", key=f"select_{path}"):
                 toggle_select((video_name, frame_idx))
 
-            if st.button(f"Delete Image {image_name}", key=f"delete_{i}"):
+            if st.button(f"Delete Image {i+1}", key=f"delete_{path}"):
                 toggle_delete(path)
 
 def display_validated_results(validated_results, id2img_fps):
@@ -68,11 +71,11 @@ def display_validated_results(validated_results, id2img_fps):
             st.write(f"Category: {category}")
             st.write(f"Confidence Score: {confidence}")
             st.write(f"Justification: {justification}")
-            if st.button(f"Play Video {video_name}", key=f"play_validated_{i}"):
+            if st.button(f"Play Video {video_name}", key=f"play_validated_{path}"):
                 display_video_for_frame(video_name, frame_idx)
-            if st.button(f"Select {image_index}", key=f"select_validated_{i}"):
+            if st.button(f"Select {image_index}", key=f"select_validated_{path}"):
                 toggle_select((video_name, frame_idx))
-            if st.button(f"Delete {image_index}", key=f"delete_validated_{i}"):
+            if st.button(f"Delete {image_index}", key=f"delete_validated_{path}"):
                 toggle_delete(path)
 
 def main():
@@ -154,7 +157,8 @@ def main():
             st.subheader("Create CSV File")
             x = st.number_input("Enter question number:", min_value=0, value=1)
             y = st.selectbox("Select type (kis or qa):", ['kis', 'qa'])
-            video_id = st.text_input("Enter video_id:")
+            video_id_input = st.text_input("Enter video_id:")
+            video_id = sanitize_filename(video_id_input)  # Sanitizing input
             time_str = st.text_input("Enter time (mm:ss):")
             answer = None
             if y == 'qa':
