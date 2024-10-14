@@ -47,39 +47,39 @@ class ResultValidatorAgent:
     def generate_prompt(self, image_path, query):
         # Include both the image and the query in the prompt
         prompt = f"""
-You are an expert image analyst.
+    You are an expert image analyst.
 
-**Task**:
-Analyze the image and determine how well it matches the following query.
+    **Task**:
+    Analyze the image and determine how well it matches the following query.
 
-**Query**: {query}
-**Image**: {image_path}
+    **Query**: {query}
+    **Image Path**: {image_path}
 
-**Instructions**:
-1. **Compare** the image to the query.
-2. **Provide** a **confidence score** between 0 and 100 indicating how well the image matches the query.
-3. **Categorize** the image into one of the following categories:
-- **Exact Match**: The image perfectly matches all aspects of the query.
-- **Near Match**: The image closely matches the query but may have minor differences.
-- **Weak Match**: The image has some elements matching the query but significant details are missing.
-- **No Match**: The image does not match the query.
-4. **Justify** your categorization with a brief explanation (one or two sentences).
+    **Instructions**:
+    1. **Compare** the image to the query.
+    2. **Provide** a **confidence score** between 0 and 100 indicating how well the image matches the query.
+    3. **Categorize** the image into one of the following categories:
+    - **Exact Match**: The image perfectly matches all aspects of the query.
+    - **Near Match**: The image closely matches the query but may have minor differences.
+    - **Weak Match**: The image has some elements matching the query but significant details are missing.
+    - **No Match**: The image does not match the query.
+    4. **Justify** your categorization with a brief explanation (one or two sentences).
 
-**Output Format**:
-Provide a JSON object with the following structure:
+    **Output Format**:
+    Provide a JSON object with the following structure:
 
-{{
-  "image": "<image_filename>",
-  "category": "<Exact Match/Near Match/Weak Match/No Match>",
-  "confidence_score": <number between 0 and 100>,
-  "justification": "<brief explanation>"
-}}
+    {{
+    "image": "<full_image_path>",
+    "category": "<Exact Match/Near Match/Weak Match/No Match>",
+    "confidence_score": <number between 0 and 100>,
+    "justification": "<brief explanation>"
+    }}
 
-**Important**:
-- Only include the requested JSON object in your response.
-- Ensure all numeric values are numbers (not strings).
-- Do not add any additional commentary or explanations.
-"""
+    **Important**:
+    - Only include the requested JSON object in your response.
+    - Ensure all numeric values are numbers (not strings).
+    - Do not add any additional commentary or explanations.
+    """
         return prompt
 
     def parse_validation(self, response):
