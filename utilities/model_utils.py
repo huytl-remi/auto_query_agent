@@ -1,4 +1,3 @@
-# utilities/model_utils.py
 import torch
 import clip
 import faiss
@@ -6,7 +5,7 @@ import json
 import os
 import streamlit as st
 from openai import OpenAI
-import pinecone
+from pinecone import Pinecone, ServerlessSpec  # Import the new Pinecone class
 
 from config import Config
 
@@ -46,15 +45,27 @@ openai_api_key = Config.OPENAI_API_KEY
 if not pinecone_api_key or not openai_api_key:
     raise ValueError("Pinecone and OpenAI API keys must be set in the environment variables.")
 
-pinecone.init(api_key=pinecone_api_key)
-client = OpenAI(api_key=openai_api_key)
+# Set up Pinecone instance
+pc = Pinecone(api_key=pinecone_api_key)
 
-# Continue with Pinecone and OpenAI setup
+# Check if the index exists, otherwise create it
 index_name = "hcmaic-sokhao-2"
-captioning_index = pinecone.Index(index_name)
+if index_name not in pc.list_indexes().names():
+    pc.create_index(
+        name=index_name,
+        dimension=1536,  # Adjust the dimension if needed
+        metric="euclidean",
+        spec=ServerlessSpec(
+            cloud="aws",
+            region="us-west-2"
+        )
+    )
+
+# Load the Pinecone index
+captioning_index = pc.Index(index_name)
 
 def get_captioning_embedding(text_query):
-    return client.embeddings.create(input=[text_query], model="text-embedding-ada-002").data[0].embedding
+    return OpenAI(api_key=openai_api_key).embeddings.create(input=[text_query], model="text-embedding-ada-002").data[0].embedding
 
 def search_image_by_text_with_captioning(text_query, top_k):
     query_embedding = get_captioning_embedding(text_query)
