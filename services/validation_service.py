@@ -2,12 +2,13 @@
 from agents.result_validator_agent import ResultValidatorAgent
 import streamlit as st
 
-def run_ai_validator(image_paths, default_llm_provider, config):
+def run_ai_validator(image_paths, query, default_llm_provider, config):
     """
     Run AI validation on the list of image paths.
 
     Args:
         image_paths (list): List of image file paths.
+        query (str): The original query string to validate the images against.
         default_llm_provider (str): The default LLM provider name.
         config (Config): The configuration object.
 
@@ -27,9 +28,9 @@ def run_ai_validator(image_paths, default_llm_provider, config):
     # Initialize the ResultValidatorAgent
     validator_agent = ResultValidatorAgent(llm_connector)
 
-    # Validate the results with error handling
+    # Validate the results and pass the query to the agent
     try:
-        validated_results = validator_agent.validate_results(image_results)
+        validated_results = validator_agent.validate_results(image_results, query)
     except Exception as e:
         st.error(f"Error during validation: {str(e)}")
         validated_results = []

@@ -144,6 +144,7 @@ def main():
         if st.button("Run AI Validator on Results"):
             validated_results = run_ai_validator(
                 image_paths=image_paths,
+                query=text_query,  # Pass the original query
                 default_llm_provider=config.DEFAULT_LLM_PROVIDER,
                 config=config
             )

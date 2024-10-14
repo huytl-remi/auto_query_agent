@@ -13,20 +13,20 @@ class ResultValidatorAgent:
     def __init__(self, llm_connector):
         self.llm_connector = llm_connector
 
-    def validate_results(self, image_results):
+    def validate_results(self, image_results, query):
         validated_results = []
         for image_result in image_results:
             image_path = image_result.get('image_path', '')
             if not image_path:
                 continue
 
-            # Generate a prompt for each image
-            prompt = self.generate_prompt(image_path)
+            # Generate a prompt using both the image path and the original query
+            prompt = self.generate_prompt(image_path, query)
 
             max_retries = 2
             for attempt in range(max_retries + 1):
                 try:
-                    # Use analyze_image to pass the image path to the LLM API
+                    # Send the image and the prompt to the LLM
                     response = self.llm_connector.analyze_image(image_path, prompt)
                     validation = self.parse_validation(response)
                     validated_results.append(validation)
@@ -34,8 +34,6 @@ class ResultValidatorAgent:
                 except Exception as e:
                     print(f"Error during validation for image {image_path}, attempt {attempt + 1}: {e}")
                     if attempt == max_retries:
-                        print(f"Max retries reached for image {image_path}.")
-                        # Add an error result if all retries fail
                         validated_results.append({
                             'image': image_path,
                             'error': str(e),
@@ -46,14 +44,15 @@ class ResultValidatorAgent:
 
         return validated_results
 
-    def generate_prompt(self, image_path):
-        # Create a prompt that instructs the LLM to analyze the image
+    def generate_prompt(self, image_path, query):
+        # Include both the image and the query in the prompt
         prompt = f"""
 You are an expert image analyst.
 
 **Task**:
-Analyze the image and determine how well it matches the provided query.
+Analyze the image and determine how well it matches the following query.
 
+**Query**: {query}
 **Image**: {image_path}
 
 **Instructions**:
@@ -75,16 +74,12 @@ Provide a JSON object with the following structure:
   "confidence_score": <number between 0 and 100>,
   "justification": "<brief explanation>"
 }}
-"""
 
-        # Ensure the LLM returns just the required JSON response
-        prompt += """
 **Important**:
 - Only include the requested JSON object in your response.
 - Ensure all numeric values are numbers (not strings).
 - Do not add any additional commentary or explanations.
 """
-
         return prompt
 
     def parse_validation(self, response):
