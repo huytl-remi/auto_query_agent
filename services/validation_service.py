@@ -1,8 +1,10 @@
 # services/validation_service.py
 from agents.result_validator_agent import ResultValidatorAgent
 import streamlit as st
+import asyncio
+# import time
 
-def run_ai_validator(image_paths, query, default_llm_provider, config):
+async def run_ai_validator(image_paths, query, default_llm_provider, config):
     """
     Run AI validation on the list of image paths.
 
@@ -15,24 +17,30 @@ def run_ai_validator(image_paths, query, default_llm_provider, config):
     Returns:
         list: List of validated results with categories and confidence scores.
     """
-    # Prepare the image results
     image_results = [{'image_path': path} for path in image_paths]
 
-    # Initialize the LLMConnector
     from llm_connectors.llm_connector import LLMConnector
     llm_connector = LLMConnector(
         provider_name=default_llm_provider,
         api_key=config.get_api_key(default_llm_provider)
     )
 
-    # Initialize the ResultValidatorAgent
     validator_agent = ResultValidatorAgent(llm_connector)
 
-    # Validate the results and pass the query to the agent
+    # Start measuring time
+    # start_time = time.time()
+
     try:
-        validated_results = validator_agent.validate_results(image_results, query)
+        validated_results = await validator_agent.validate_results(image_results, query)
     except Exception as e:
-        st.error(f"Error during validation: {str(e)}")
+        print(f"Error during validation: {str(e)}")
         validated_results = []
+
+    # End measuring time
+    # end_time = time.time()
+    # elapsed_time = end_time - start_time
+
+    # Log or display the time taken
+    # st.write(f"AI validation completed in {elapsed_time:.2f} seconds")
 
     return validated_results
