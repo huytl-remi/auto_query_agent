@@ -1,5 +1,6 @@
 # app.py
 import streamlit as st
+import asyncio
 import os
 import re  # Added for sanitization
 
@@ -30,6 +31,14 @@ if "deleted_images" not in st.session_state:
 
 if "selected_images" not in st.session_state:
     st.session_state.selected_images = []
+
+async def run_validator(image_paths, text_query, config):
+    return await run_ai_validator(
+        image_paths=image_paths,
+        query=text_query,
+        default_llm_provider=config.DEFAULT_LLM_PROVIDER,
+        config=config
+    )
 
 def display_images(image_paths, id2img_fps):
     cols = st.columns(5)
@@ -142,12 +151,20 @@ def main():
 
         # AI Validator Button
         if st.button("Run AI Validator on Results"):
-            validated_results = run_ai_validator(
-                image_paths=image_paths,
-                query=text_query,  # Pass the original query
-                default_llm_provider=config.DEFAULT_LLM_PROVIDER,
-                config=config
-            )
+            with st.spinner("Validating results..."):
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    validated_results = loop.run_until_complete(
+                        run_validator(
+                            image_paths=image_paths,
+                            text_query=text_query,
+                            config=config
+                        )
+                    )
+                finally:
+                    loop.close()
+
             st.subheader("Validated Results")
             display_validated_results(validated_results, id2img_fps)
 
