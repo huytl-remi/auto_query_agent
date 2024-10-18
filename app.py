@@ -6,9 +6,13 @@ import re  # Added for sanitization
 
 from config import Config
 
+from llm_connectors.llm_connector import LLMConnector
+
 from services.search_service import perform_search
 from services.filter_service import apply_metadata_filters
-from services.validation_service import run_ai_validator
+from services.agent_search_service import AgentSearchService
+
+from agents.agent_orchestrator import AgentOrchestrator
 
 from utilities.video_utils import display_video_for_frame, get_video_and_frame_idx
 from utilities.csv_utils import create_csv_file, create_csv_with_selected_images
@@ -23,6 +27,10 @@ from session.session_state import (
 
 from utilities.utils import sanitize_filename  # Importing sanitize_filename
 
+llm_provider = Config.DEFAULT_LLM_PROVIDER
+api_key = Config.get_api_key(llm_provider)
+llm_connector = LLMConnector(provider_name=llm_provider, api_key=api_key)
+
 st.set_page_config(layout="wide")
 
 # Initialize session state for deleted and selected images
@@ -32,13 +40,36 @@ if "deleted_images" not in st.session_state:
 if "selected_images" not in st.session_state:
     st.session_state.selected_images = []
 
-async def run_validator(image_paths, text_query, config):
-    return await run_ai_validator(
-        image_paths=image_paths,
-        query=text_query,
-        default_llm_provider=config.DEFAULT_LLM_PROVIDER,
-        config=config
-    )
+def human_verification(classification):
+    st.subheader("Human Verification")
+
+    temporal = st.checkbox("Temporal Query", value=classification['temporal'])
+    question = st.checkbox("Question-based Query", value=classification['question'])
+
+    num_scenes = st.number_input("Number of Scenes", min_value=1, value=classification['number_of_scenes'])
+
+    scenes = []
+    for i in range(num_scenes):
+        st.subheader(f"Scene {i+1}")
+        scene_desc = st.text_area(f"Scene {i+1} Description", value=classification['scenes'][i]['description'] if i < len(classification['scenes']) else "")
+        scene_question = st.checkbox(f"Scene {i+1} has a question", value=classification['scenes'][i]['question'] if i < len(classification['scenes']) else False)
+        specific_question = st.text_input(f"Scene {i+1} Question", value=classification['scenes'][i]['specific_question'] if i < len(classification['scenes']) else "", disabled=not scene_question)
+
+        scenes.append({
+            "scene": i+1,
+            "description": scene_desc,
+            "question": scene_question,
+            "specific_question": specific_question if scene_question else None
+        })
+
+    if st.button("Confirm Classification"):
+        return {
+            "temporal": temporal,
+            "question": question,
+            "number_of_scenes": num_scenes,
+            "scenes": scenes
+        }
+    return None
 
 def display_images(image_paths, id2img_fps):
     cols = st.columns(5)
@@ -60,19 +91,19 @@ def display_images(image_paths, id2img_fps):
 
 def display_validated_results(validated_results, id2img_fps):
     # Filter out 'Weak Match' and 'No Match' results
-    filtered_results = [res for res in validated_results if res['category'] in ['Exact Match', 'Near Match']]
+    filtered_results = [res for res in validated_results if res['match_assessment']['category'] in ['Exact Match', 'Near Match']]
 
     # Sort results, placing 'Exact Match' at the top
-    filtered_results.sort(key=lambda x: ('1' if x['category'] == 'Exact Match' else '2', -x['confidence_score']))
+    filtered_results.sort(key=lambda x: ('1' if x['match_assessment']['category'] == 'Exact Match' else '2', -x['match_assessment']['confidence']))
 
     # Display the results
     cols = st.columns(5)
     for i, validation in enumerate(filtered_results):
-        path = validation['image']
+        path = validation['image_path']
         image_index = i + 1
         video_name, frame_idx, time_display = get_video_and_frame_idx(path, id2img_fps)
-        confidence = validation['confidence_score']
-        category = validation['category']
+        confidence = validation['match_assessment']['confidence']
+        category = validation['match_assessment']['category']
         justification = validation['justification']
 
         with cols[i % 5]:
@@ -80,6 +111,8 @@ def display_validated_results(validated_results, id2img_fps):
             st.write(f"Category: {category}")
             st.write(f"Confidence Score: {confidence}")
             st.write(f"Justification: {justification}")
+            if validation['question_answer']['answer']:
+                st.write(f"Answer: {validation['question_answer']['answer']}")
             if st.button(f"Play Video {video_name}", key=f"play_validated_{path}"):
                 display_video_for_frame(video_name, frame_idx)
             if st.button(f"Select {image_index}", key=f"select_validated_{path}"):
@@ -97,18 +130,21 @@ def main():
         top_k = st.number_input("Enter value for top_k:", min_value=1, value=10)
 
     with col2:
-        search_method = st.selectbox("Choose search method:", ["CLIP", "Captioning", "OCR"])
+        search_method = st.selectbox("Choose search method:", ["CLIP", "Captioning", "OCR", "Agent"])
 
     with col3:
-        text_query = st.text_input(f"Enter your query for {search_method} search:", "")
+        if search_method != "Agent":
+            text_query = st.text_input(f"Enter your query for {search_method} search:", "")
+        else:
+            text_query = st.text_area("Enter the competition prompt:")
 
-    if text_query:
-        # Load configurations
-        config = Config()
-        model, preprocess = load_model()
-        index = load_faiss_index()
-        id2img_fps = load_id2img_fps()
+    # Load configurations
+    config = Config()
+    model, preprocess = load_model()
+    index = load_faiss_index()
+    id2img_fps = load_id2img_fps()
 
+    if search_method != "Agent" and text_query:
         # Perform search
         image_paths = perform_search(
             search_method=search_method,
@@ -149,56 +185,60 @@ def main():
         st.subheader("Search Results")
         display_images(image_paths, id2img_fps)
 
-        # AI Validator Button
-        if st.button("Run AI Validator on Results"):
-            with st.spinner("Validating results..."):
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    validated_results = loop.run_until_complete(
-                        run_validator(
-                            image_paths=image_paths,
-                            text_query=text_query,
-                            config=config
-                        )
-                    )
-                finally:
-                    loop.close()
+    elif search_method == "Agent" and text_query:
+        agent_search_service = AgentSearchService(model, index, id2img_fps)
+        agent_orchestrator = AgentOrchestrator(llm_connector, agent_search_service)
 
-            st.subheader("Validated Results")
-            display_validated_results(validated_results, id2img_fps)
+        if st.button("Run Agent Search"):
+            with st.spinner("Agent processing query..."):
+                # Step 1: Query Classification
+                classification = agent_orchestrator.query_classifier.classify_query(text_query)
 
-        # CSV Creation and Selected Images Display
-        left_col, right_col = st.columns(2)
-        with left_col:
-            # CSV creation and download
-            st.subheader("Create CSV File")
-            x = st.number_input("Enter question number:", min_value=0, value=1)
-            y = st.selectbox("Select type (kis or qa):", ['kis', 'qa'])
-            video_id_input = st.text_input("Enter video_id:")
-            video_id = sanitize_filename(video_id_input)  # Sanitizing input
-            time_str = st.text_input("Enter time (mm:ss):")
-            answer = None
-            if y == 'qa':
-                answer = st.number_input("Enter answer:", min_value=0, value=1)
+                # Step 2: Human Verification
+                st.subheader("Query Classification")
+                st.json(classification)
 
-            if st.button("Create CSV"):
-                csv_content, file_path = create_csv_file(x, y, video_id, time_str, answer)
-                if csv_content:
-                    st.download_button(label="Download CSV", data=csv_content, file_name=f"query-{x}-{y}.csv")
+                verified_classification = human_verification(classification)
 
-        with right_col:
-            # Display selected images
-            st.subheader("Selected Images")
-            if st.session_state.selected_images:
-                for img in st.session_state.selected_images:
-                    st.write(f"Video: {img[0]}, Frame: {img[1]}")
-                    if st.button(f"Remove {img[0]} - {img[1]}"):
-                        st.session_state.selected_images.remove(img)
+                if verified_classification:
+                    # Step 3: Process Query
+                    results = asyncio.run(agent_orchestrator.process_query(text_query, verified_classification))
 
-                if st.button("Create CSV with selected images"):
-                    csv_content = create_csv_with_selected_images(st.session_state.selected_images, y, answer)
-                    st.download_button(label="Download CSV", data=csv_content, file_name=f"query-{y}.csv")
+                    # Step 4: Display Results
+                    st.subheader("Search Results")
+                    display_validated_results(results, id2img_fps)
+
+    # CSV Creation and Selected Images Display
+    left_col, right_col = st.columns(2)
+    with left_col:
+        # CSV creation and download
+        st.subheader("Create CSV File")
+        x = st.number_input("Enter question number:", min_value=0, value=1)
+        y = st.selectbox("Select type (kis or qa):", ['kis', 'qa'])
+        video_id_input = st.text_input("Enter video_id:")
+        video_id = sanitize_filename(video_id_input)  # Sanitizing input
+        time_str = st.text_input("Enter time (mm:ss):")
+        answer = None
+        if y == 'qa':
+            answer = st.number_input("Enter answer:", min_value=0, value=1)
+
+        if st.button("Create CSV"):
+            csv_content, file_path = create_csv_file(x, y, video_id, time_str, answer)
+            if csv_content:
+                st.download_button(label="Download CSV", data=csv_content, file_name=f"query-{x}-{y}.csv")
+
+    with right_col:
+        # Display selected images
+        st.subheader("Selected Images")
+        if st.session_state.selected_images:
+            for img in st.session_state.selected_images:
+                st.write(f"Video: {img[0]}, Frame: {img[1]}")
+                if st.button(f"Remove {img[0]} - {img[1]}"):
+                    st.session_state.selected_images.remove(img)
+
+            if st.button("Create CSV with selected images"):
+                csv_content = create_csv_with_selected_images(st.session_state.selected_images, y, answer)
+                st.download_button(label="Download CSV", data=csv_content, file_name=f"query-{y}.csv")
 
 if __name__ == "__main__":
     main()
