@@ -2,3 +2,7 @@
 .gitignore
 .env
 .coverage
+__pycache__
+agents/__pycache__
+llm_connectors/__pycache__
+utilities/__pycache__
