@@ -1,20 +1,23 @@
-# utils/json_parser.py
 import json
 import re
 
 def parse_json_response(response):
-    """
-    Extracts and parses the JSON object from the LLM response,
-    handling different formats and providers.
-    """
+    if isinstance(response, dict):
+        return response
+
+    if not isinstance(response, str):
+        raise ValueError("Input must be a string or dictionary")
+
+    # Remove markdown code blocks if present
+    cleaned_response = re.sub(r'```json\s*|\s*```', '', response).strip()
+
+    # If that didn't work, try to find JSON within the string
+    if not cleaned_response.startswith('{'):
+        json_match = re.search(r'\{.*\}', cleaned_response, re.DOTALL)
+        if json_match:
+            cleaned_response = json_match.group()
+
     try:
-        # Use regex to find the first JSON object in the response
-        json_pattern = re.compile(r'\{.*\}', re.DOTALL)
-        match = json_pattern.search(response)
-        if match:
-            json_str = match.group()
-            return json.loads(json_str)
-        else:
-            raise ValueError("No JSON object found in the response.")
+        return json.loads(cleaned_response)
     except json.JSONDecodeError as e:
-        raise ValueError(f"JSON parsing error: {e}")
+        raise ValueError(f"Failed to parse JSON: {e}")

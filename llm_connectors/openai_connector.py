@@ -7,7 +7,7 @@ import aiofiles
 from .base import LLMConnectorBase
 
 class OpenAIConnector(LLMConnectorBase):
-    def __init__(self, api_key, model="gpt-4"):
+    def __init__(self, api_key, model="gpt-4o"):
         openai.api_key = api_key
         self.model = model
 
@@ -55,7 +55,7 @@ class OpenAIConnector(LLMConnectorBase):
             payload = {
                 "model": self.model,
                 "messages": [{"role": "user", "content": message_content}],
-                "max_tokens": kwargs.get('max_tokens', 300)
+                "max_tokens": kwargs.get('max_tokens', 1024)
             }
             async with session.post("https://api.openai.com/v1/chat/completions",
                                     headers=headers, json=payload) as resp:

@@ -1,14 +1,29 @@
 import json
+import re
 from utilities.json_parser import parse_json_response
+import logging
+
+logger = logging.getLogger(__name__)
 
 class PromptCrafterAgent:
     def __init__(self, llm_connector):
         self.llm_connector = llm_connector
 
-    def craft_prompts(self, classification):
+    async def craft_prompts(self, classification):
+        logger.info(f"Starting prompt crafting with classification: {classification}")
         prompt = self._generate_super_prompt(classification)
-        response = self.llm_connector.generate_text(prompt)
-        return self._parse_response(response)
+        logger.debug(f"Generated super prompt: {prompt}")
+
+        response = await self.llm_connector.generate_text(prompt)
+        logger.info(f"Raw LLM response:\n{response}")
+
+        parsed_response = self._parse_response(response)
+        if parsed_response is None:
+            logger.error("Failed to parse LLM response")
+            raise ValueError("Failed to parse LLM response")
+
+        logger.info(f"Parsed response: {parsed_response}")
+        return parsed_response
 
     def _generate_super_prompt(self, classification):
         return f"""
@@ -32,10 +47,12 @@ class PromptCrafterAgent:
            - use concise, descriptive language focusing on visual elements.
            - prioritize nouns, adjectives, and action verbs.
            - example: "man in red shirt running through crowded street"
+           - Exclude text elements from the prompt
 
         2. caption prompts (vietnamese):
            - exact translation of CLIP prompt
-           - example: "Người đàn ông mặc áo đỏ chạy qua đường phố đông đúc"
+           - include text element in the prompt
+           - example: "Người đàn ông mặc áo đỏ có chữ 'Bon Jovi' chạy qua đường phố đông đúc"
 
         3. for both prompt types:
            - be specific about colors, numbers, and spatial relationships.
@@ -86,18 +103,26 @@ class PromptCrafterAgent:
 
     def _parse_response(self, response):
         try:
-            parsed_response = json.loads(response)
+            parsed_response = parse_json_response(response)
+            logger.debug(f"JSON parsed response: {parsed_response}")
+
             if "error" in parsed_response:
+                logger.error(f"Error in LLM response: {parsed_response['error']}")
                 raise ValueError(f"Error in LLM response: {parsed_response['error']}")
-            if not all(key in parsed_response for key in ['clip_prompts', 'caption_prompts', 'question']):
-                raise ValueError("Missing required keys in the response")
+
+            required_keys = ['clip_prompts', 'caption_prompts', 'question']
+            if not all(key in parsed_response for key in required_keys):
+                missing_keys = [key for key in required_keys if key not in parsed_response]
+                logger.error(f"Missing required keys in the response: {missing_keys}")
+                raise ValueError(f"Missing required keys in the response: {missing_keys}")
+
             return parsed_response
-        except json.JSONDecodeError as e:
-            print(f"Error: Failed to parse JSON response: {e}")
-            return None
+
         except ValueError as e:
-            print(f"Error: {str(e)}")
+            logger.error(f"ValueError during JSON parsing: {str(e)}")
+            logger.debug(f"Raw response that caused ValueError: {response}")
             return None
         except Exception as e:
-            print(f"Unexpected error: {str(e)}")
+            logger.error(f"Unexpected error in parsing response: {str(e)}")
+            logger.debug(f"Raw response that caused unexpected error: {response}")
             return None

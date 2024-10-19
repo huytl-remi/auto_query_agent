@@ -55,7 +55,7 @@ pc = Pinecone(api_key=pinecone_api_key)
 client = OpenAI(api_key=openai_api_key)
 
 # Set up Pinecone index
-index_name = "hcmaic-sokhao-2"
+index_name = "hcmaic-chungket"
 if index_name not in pc.list_indexes().names():
     pc.create_index(
         name=index_name,

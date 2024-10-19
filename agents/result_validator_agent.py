@@ -3,21 +3,28 @@ import asyncio
 import tenacity
 from utilities.json_parser import parse_json_response
 from llm_connectors.llm_connector import LLMConnector
-from config import Config
+import logging
+from typing import Dict, Any, List, Optional
 
-llm_provider = Config.DEFAULT_LLM_PROVIDER
-api_key = Config.get_api_key(llm_provider)
-llm_connector = LLMConnector(provider_name=llm_provider, api_key=api_key)
+logger = logging.getLogger(__name__)
+
+class ValidationError(Exception):
+    pass
 
 class ResultValidatorAgent:
-    def __init__(self, llm_connector, max_concurrent_requests=100):
+    def __init__(self, llm_connector: LLMConnector, max_concurrent_requests: int = 500):
         self.llm_connector = llm_connector
         self.semaphore = asyncio.Semaphore(max_concurrent_requests)
 
-    async def validate_single_result(self, image_result, clip_prompt, question):
+    async def validate_single_result(self, image_result: Dict[str, Any], clip_prompt: str, question: Optional[str] = None) -> Dict[str, Any]:
         image_path = image_result.get('image_path', '')
         if not image_path:
-            return None
+            return {
+                'image_path': '',
+                'error': 'No image path provided',
+                'match_assessment': {'category': 'No Match', 'confidence': 0},
+                'justification': 'Invalid input'
+            }
 
         validator_prompt = self._generate_validator_prompt(clip_prompt, question, image_path)
 
@@ -35,7 +42,7 @@ class ResultValidatorAgent:
                 validation = self.parse_validation(response)
                 return validation
         except Exception as e:
-            print(f"Error during validation for image {image_path}: {e}")
+            logger.error(f"Error during validation for image {image_path}: {e}")
             return {
                 'image_path': image_path,
                 'error': str(e),
@@ -46,7 +53,7 @@ class ResultValidatorAgent:
                 'justification': "Validation failed due to error."
             }
 
-    async def validate_results(self, image_results, crafted_prompts):
+    async def validate_results(self, image_results: List[Dict[str, Any]], crafted_prompts: Dict[str, Any]) -> List[Dict[str, Any]]:
         tasks = []
         for image_result in image_results:
             for prompt in crafted_prompts['clip_prompts']:
@@ -55,15 +62,21 @@ class ResultValidatorAgent:
                 tasks.append(self.validate_single_result(image_result, clip_prompt, question))
 
         validated_results = await asyncio.gather(*tasks)
-        return validated_results
+        return [result for result in validated_results if result is not None]
 
     def _generate_validator_prompt(self, clip_prompt, question, image_path):
         return f"""
         you're an expert image analyst. analyze this image based on the given prompt and question.
 
-        prompt: {clip_prompt}
-        question: {question or 'No question provided'}
-        image path: {image_path}
+        <prompt>
+        {clip_prompt}
+        </prompt>
+        <question>
+        {question or 'No question provided'}
+        </question>
+        <image path>
+        {image_path}
+        </image path>
 
         instructions:
         1. break down the prompt into key visual elements.
@@ -101,56 +114,40 @@ class ResultValidatorAgent:
 
     def parse_validation(self, response):
         try:
+            logger.debug(f"Raw LLM response: {response}")
             validation = parse_json_response(response)
+            logger.debug(f"Parsed validation: {validation}")
+            # Handle 'match_assessment' being a string
+            match_assessment = validation.get('match_assessment', {})
+            if isinstance(match_assessment, str):
+                match_assessment = {
+                    'category': match_assessment,
+                    'confidence': 0.0  # Default confidence
+                }
 
-            required_keys = ['image_path', 'question_answer', 'match_assessment', 'justification']
-            if not all(key in validation for key in required_keys):
-                raise KeyError("Missing required keys in the validation response.")
-
-            # Validate field types and structures
-            if not isinstance(validation['image_path'], str):
-                raise TypeError(f"'image_path' should be a string. Got {type(validation['image_path'])}.")
-
-            if not isinstance(validation['question_answer'], dict):
-                raise TypeError(f"'question_answer' should be a dictionary. Got {type(validation['question_answer'])}.")
-
-            question_answer = validation['question_answer']
-            if not all(key in question_answer for key in ['question', 'answer', 'confidence']):
-                raise KeyError("Missing required keys in question_answer.")
-
-            if not isinstance(question_answer['confidence'], (int, float)) or not 0 <= question_answer['confidence'] <= 1:
-                raise ValueError(f"'confidence' in question_answer should be a number between 0 and 1. Got {question_answer['confidence']}.")
-
-            if not isinstance(validation['match_assessment'], dict):
-                raise TypeError(f"'match_assessment' should be a dictionary. Got {type(validation['match_assessment'])}.")
-
-            if not all(key in validation['match_assessment'] for key in ['category', 'confidence']):
-                raise KeyError("Missing required keys in match_assessment.")
-
-            if validation['match_assessment']['category'] not in ["Exact Match", "Near Match", "Weak Match", "No Match"]:
-                raise ValueError(f"Invalid category: {validation['match_assessment']['category']}")
-
-            if not isinstance(validation['match_assessment']['confidence'], (int, float)) or not 0 <= validation['match_assessment']['confidence'] <= 1:
-                raise ValueError(f"'confidence' in match_assessment should be a number between 0 and 1. Got {validation['match_assessment']['confidence']}.")
-
-            if not isinstance(validation['justification'], str):
-                raise TypeError(f"'justification' should be a string. Got {type(validation['justification'])}.")
-
-            # Return only the required fields
             return {
-                'image_path': validation['image_path'],
+                'image_path': validation.get('image_path', ''),
+                'question_answer': validation.get('question_answer', {
+                    'question': '',
+                    'answer': '',
+                    'confidence': 0.0
+                }),
+                'match_assessment': match_assessment,
+                'justification': validation.get('justification', '')
+            }
+        except Exception as e:
+            logger.error(f"Error parsing validation: {e}")
+            # Handle parsing error
+            return {
+                'image_path': '',
                 'question_answer': {
-                    'question': question_answer['question'],
-                    'answer': question_answer['answer'],
-                    'confidence': question_answer['confidence']
+                    'question': '',
+                    'answer': '',
+                    'confidence': 0.0
                 },
                 'match_assessment': {
-                    'category': validation['match_assessment']['category'],
-                    'confidence': validation['match_assessment']['confidence']
+                    'category': 'No Match',
+                    'confidence': 0.0
                 },
-                'justification': validation['justification']
+                'justification': f'Failed to parse validation: {str(e)}'
             }
-
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
-            print(f"Error parsing validation: {e}")
-            raise ValueError("Failed to parse or validate the LLM response correctly.")

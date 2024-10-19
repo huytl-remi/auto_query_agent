@@ -12,20 +12,20 @@ class AgentSearchService:
         self.index = index
         self.id2img_fps = id2img_fps
 
-    async def agent_search(self, clip_prompt, caption_prompt, top_p=500):
-        clip_results = await self.clip_search(clip_prompt, top_p)
-        caption_results = await self.caption_search(caption_prompt, top_p)
+    async def agent_search(self, clip_prompt, caption_prompt, top_k):
+        clip_results = await self.clip_search(clip_prompt, top_k)
+        caption_results = await self.caption_search(caption_prompt, top_k)
 
         combined_results = self.combine_results(clip_results, caption_results)
         return combined_results
 
-    async def clip_search(self, prompt, top_p):
-        image_indices, distances = search_image_by_text(self.model, self.index, prompt, top_p)
+    async def clip_search(self, prompt, top_k):
+        image_indices, distances = search_image_by_text(self.model, self.index, prompt, top_k)
         image_paths = get_image_paths(image_indices, self.id2img_fps)
         return [{'image_path': path, 'distance': dist} for path, dist in zip(image_paths, distances[0])]
 
-    async def caption_search(self, prompt, top_p):
-        image_paths = search_image_by_text_with_captioning(prompt, top_p)
+    async def caption_search(self, prompt, top_k):
+        image_paths = search_image_by_text_with_captioning(prompt, top_k)
         return [{'image_path': path} for path in image_paths]
 
     def combine_results(self, clip_results, caption_results):

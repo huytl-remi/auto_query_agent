@@ -6,9 +6,9 @@ class QueryClassifierAgent:
     def __init__(self, llm_connector):
         self.llm_connector = llm_connector
 
-    def classify_query(self, input_query):
+    async def classify_query(self, input_query):
         prompt = self.generate_prompt(input_query)
-        response = self.llm_connector.generate_text(prompt)
+        response = await self.llm_connector.generate_text(prompt)
         return self.parse_classification(response)
 
     def generate_prompt(self, input_query):
